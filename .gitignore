@@ -1,0 +1,39 @@
+# Arquivos binários e de build
+/bin/
+/out/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Diretórios criados pelo comando go build
+/build/
+*.o
+*.a
+
+# Dependências baixadas localmente (gerenciadas pelo módulo Go)
+vendor/
+
+# Cache de testes
+*.test
+
+# Arquivos gerados por IDEs/editores
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Arquivos temporários do sistema operacional
+*.DS_Store
+Thumbs.db
+
+# Arquivos temporários de desenvolvimento
+*.log
+*.tmp
+
+# Cobertura de testes
+coverage.out
+
+# Arquivos de configuração local
+.env
