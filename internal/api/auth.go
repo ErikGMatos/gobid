@@ -12,7 +12,7 @@ func (api *Api) HandleGetCsrfToken(w http.ResponseWriter, r *http.Request) {
 	jsonutils.EncodeJson(w, r, http.StatusOK, map[string]any{"csrf_token": token})
 }
 
-func (api *Api) authMiddleware(next http.Handler) http.Handler {
+func (api *Api) AuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !api.Sessions.Exists(r.Context(), "AuthenticatedUserId") {
 			jsonutils.EncodeJson(w, r, http.StatusUnauthorized, map[string]string{"error": "must be logged in"})
