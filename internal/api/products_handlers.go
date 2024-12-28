@@ -1,9 +1,11 @@
 package api
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/erikgmatos/gobid/internal/jsonutils"
+	"github.com/erikgmatos/gobid/internal/services"
 	"github.com/erikgmatos/gobid/internal/usecase/product"
 	"github.com/google/uuid"
 )
@@ -22,7 +24,7 @@ func (api *Api) handleCreateProduct(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	id, err := api.ProductServices.CreateProduct(
+	productId, err := api.ProductServices.CreateProduct(
 		r.Context(),
 		userID,
 		data.ProductName,
@@ -35,8 +37,18 @@ func (api *Api) handleCreateProduct(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+
+	ctx, _ := context.WithDeadline(context.Background(), data.AuctionEnd)
+
+	auctionRomm := services.NewAuctionRoom(ctx, productId, api.BidsServices)
+
+	go auctionRomm.Run()
+	api.AuctionLobby.Lock()
+	api.AuctionLobby.Rooms[productId] = auctionRomm
+	api.AuctionLobby.Unlock()
+
 	jsonutils.EncodeJson(w, r, http.StatusCreated, map[string]any{
-		"message":    "product created with success",
-		"product_id": id,
+		"message":    "auction ha started with success",
+		"product_id": productId,
 	})
 }

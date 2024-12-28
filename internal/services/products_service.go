@@ -2,10 +2,12 @@ package services
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/erikgmatos/gobid/internal/store/pgstore"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -39,4 +41,17 @@ func (ps *ProductService) CreateProduct(ctx context.Context,
 		return uuid.UUID{}, err
 	}
 	return id, nil
+}
+
+var ErrProductNotFond = errors.New("product not found")
+
+func (ps *ProductService) GetProductById(ctx context.Context, productId uuid.UUID) (pgstore.Product, error) {
+	product, err := ps.queries.GetProductById(ctx, productId)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return pgstore.Product{}, ErrProductNotFond
+		}
+		return pgstore.Product{}, err
+	}
+	return product, nil
 }
