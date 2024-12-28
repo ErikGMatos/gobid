@@ -70,18 +70,18 @@ func (ar *AuctionRoom) broadcastMessage(m Message) {
 		if err != nil {
 			if errors.Is(err, ErrBidIsToLow) {
 				if client, ok := ar.Clients[m.UserId]; ok {
-					client.Send <- Message{Message: ErrBidIsToLow.Error(), Kind: FailedToPlaceBid}
+					client.Send <- Message{Message: ErrBidIsToLow.Error(), Kind: FailedToPlaceBid, UserId: m.UserId}
 				}
 			}
 			return
 		}
 
 		if client, ok := ar.Clients[m.UserId]; ok {
-			client.Send <- Message{Message: "Your bid was ssuccessfully placed", Kind: SuccessfullyPlaceBid}
+			client.Send <- Message{Message: "Your bid was ssuccessfully placed", Kind: SuccessfullyPlaceBid, UserId: m.UserId}
 		}
 
 		for id, client := range ar.Clients {
-			newBidPalced := Message{Kind: NewBidPlaced, Message: "A new bid was placed", Amount: bid.BidAmount}
+			newBidPalced := Message{Kind: NewBidPlaced, Message: "A new bid was placed", Amount: bid.BidAmount, UserId: m.UserId}
 			if id == m.UserId {
 				continue
 			}
@@ -155,6 +155,8 @@ func NewClient(room *AuctionRoom, conn *websocket.Conn, userId uuid.UUID) *Clien
 const (
 	maxMessageSize = 512
 	readDeadline   = 60 * time.Second
+	writeWait      = 10 * time.Second
+	pingPeriod     = (readDeadline * 9) / 10
 )
 
 func (c *Client) ReadEventLoop() {
@@ -180,7 +182,42 @@ func (c *Client) ReadEventLoop() {
 				return
 			}
 			c.Room.Broadcast <- Message{Message: "this message should be a valid JSON", Kind: InvalidJSON, UserId: m.UserId}
+			continue
 		}
 		c.Room.Broadcast <- m
+	}
+}
+
+func (c *Client) WriteEventLoop() {
+	ticker := time.NewTicker(pingPeriod)
+	defer func() {
+		ticker.Stop()
+		c.Conn.Close()
+	}()
+
+	for {
+		select {
+		case message, ok := <-c.Send:
+			if !ok {
+				c.Conn.WriteJSON(Message{Message: "Close websocket connection", Kind: websocket.CloseMessage})
+				return
+			}
+			if message.Kind == AuctionFinished {
+				close(c.Send)
+				return
+			}
+			c.Conn.SetWriteDeadline(time.Now().Add(writeWait))
+			err := c.Conn.WriteJSON(message)
+			if err != nil {
+				c.Room.Unregister <- c
+				return
+			}
+		case <-ticker.C:
+			c.Conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if err := c.Conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				slog.Error("Unexpected error", "error", err)
+				return
+			}
+		}
 	}
 }
