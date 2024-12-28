@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
@@ -25,13 +26,14 @@ const (
 
 	//Errors
 	FailedToPlaceBid
+	InvalidJSON
 )
 
 type Message struct {
-	Message string
-	Kind    MessageKind
-	UserId  uuid.UUID
-	Amount  float64
+	Message string      `json:"message,omitempty"`
+	Amount  float64     `json:"amount,omitempty"`
+	Kind    MessageKind `json:"kind"`
+	UserId  uuid.UUID   `json:"user_id,omitempty"`
 }
 
 type AuctionLobby struct {
@@ -85,6 +87,14 @@ func (ar *AuctionRoom) broadcastMessage(m Message) {
 			}
 			client.Send <- newBidPalced
 		}
+
+	case InvalidJSON:
+		client, ok := ar.Clients[m.UserId]
+		if !ok {
+			slog.Info("Client not found in hashmap", "user_id", m.UserId)
+			return
+		}
+		client.Send <- m
 	}
 }
 
@@ -103,14 +113,7 @@ func (ar *AuctionRoom) Run() {
 		case client := <-ar.Unregister:
 			ar.unRegisterClient(client)
 		case message := <-ar.Broadcast:
-			for _, client := range ar.Clients {
-				select {
-				case client.Send <- message:
-				default:
-					close(client.Send)
-					delete(ar.Clients, client.UserId)
-				}
-			}
+			ar.broadcastMessage(message)
 		case <-ar.Context.Done():
 			slog.Info("Auction has ended.", "AuctionID", ar.Id)
 			for _, client := range ar.Clients {
@@ -146,5 +149,38 @@ func NewClient(room *AuctionRoom, conn *websocket.Conn, userId uuid.UUID) *Clien
 		Conn:   conn,
 		Send:   make(chan Message, 512),
 		UserId: userId,
+	}
+}
+
+const (
+	maxMessageSize = 512
+	readDeadline   = 60 * time.Second
+)
+
+func (c *Client) ReadEventLoop() {
+	defer func() {
+		c.Room.Unregister <- c
+		c.Conn.Close()
+	}()
+
+	c.Conn.SetReadLimit(maxMessageSize)
+	c.Conn.SetReadDeadline(time.Now().Add(readDeadline))
+	c.Conn.SetPongHandler(func(string) error {
+		c.Conn.SetReadDeadline(time.Now().Add(readDeadline))
+		return nil
+	})
+
+	for {
+		var m Message
+		m.UserId = c.UserId
+		err := c.Conn.ReadJSON(&m)
+		if err != nil {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+				slog.Error("Unexpected close error", "Error", err)
+				return
+			}
+			c.Room.Broadcast <- Message{Message: "this message should be a valid JSON", Kind: InvalidJSON, UserId: m.UserId}
+		}
+		c.Room.Broadcast <- m
 	}
 }
